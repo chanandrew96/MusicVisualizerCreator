@@ -192,12 +192,140 @@
             font-size: 0.9em;
             color: #666;
         }
+        
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .preview-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .preview-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(76, 175, 80, 0.4);
+        }
+        
+        .preview-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            border: 2px solid #667eea;
+        }
+        
+        .progress-container.active {
+            display: block;
+        }
+        
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        .progress-status {
+            text-align: center;
+            color: #667eea;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        
+        .preview-container {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            border: 2px solid #4CAF50;
+        }
+        
+        .preview-container.active {
+            display: block;
+        }
+        
+        .preview-video {
+            width: 100%;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+        
+        .preview-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .action-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .download-btn {
+            background: #667eea;
+            color: white;
+        }
+        
+        .download-btn:hover {
+            background: #764ba2;
+        }
+        
+        .regenerate-btn {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .regenerate-btn:hover {
+            background: #f57c00;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎵 音樂視覺化創建器</h1>
-        <p class="subtitle">將您的音頻轉換為帶有聲波可視化的視頻</p>
+        <p class="subtitle">參考 <a href="https://www.youtube.com/watch?v=jPzkNvWOcGc" target="_blank" rel="noopener noreferrer">靈感影片</a>，生成帶有放射光柱與粒子流的沉浸式聲波視頻</p>
         
         <form id="uploadForm" enctype="multipart/form-data">
             <div class="form-group">
@@ -246,10 +374,33 @@
                 </select>
             </div>
             
-            <button type="submit" class="submit-btn" id="submitBtn">創建視頻</button>
+            <div class="button-group">
+                <button type="button" class="preview-btn" id="previewBtn">
+                    🎬 生成預覽 (8秒)
+                </button>
+                <button type="button" class="submit-btn" id="generateBtn">
+                    🎥 生成完整視頻
+                </button>
+            </div>
             
-            <div class="loading" id="loading">
-                ⏳ 正在處理中，請稍候...
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-status" id="progressStatus">準備中...</div>
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progressBar">0%</div>
+                </div>
+            </div>
+            
+            <div class="preview-container" id="previewContainer">
+                <h3 style="color: #4CAF50; margin-bottom: 10px;">✨ 預覽視頻</h3>
+                <video class="preview-video" id="previewVideo" controls></video>
+                <div class="preview-actions">
+                    <button type="button" class="action-btn download-btn" id="downloadPreviewBtn">
+                        下載預覽
+                    </button>
+                    <button type="button" class="action-btn regenerate-btn" id="regenerateBtn">
+                        生成完整視頻
+                    </button>
+                </div>
             </div>
             
             <div class="error" id="error"></div>
@@ -257,6 +408,9 @@
     </div>
     
     <script>
+        let currentTaskId = null;
+        let progressInterval = null;
+        
         function setSize(width, height) {
             document.getElementById('width').value = width;
             document.getElementById('height').value = height;
@@ -280,31 +434,87 @@
             }
         });
         
-        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+        function updateProgressBar(progress, message) {
+            const progressBar = document.getElementById('progressBar');
+            const progressStatus = document.getElementById('progressStatus');
+            progressBar.style.width = progress + '%';
+            progressBar.textContent = Math.round(progress) + '%';
+            progressStatus.textContent = message || '處理中...';
+        }
+        
+        function startProgressPolling(taskId) {
+            currentTaskId = taskId;
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.classList.add('active');
             
-            const formData = new FormData(this);
-            const submitBtn = document.getElementById('submitBtn');
-            const loading = document.getElementById('loading');
-            const error = document.getElementById('error');
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
             
-            // Hide error, show loading
-            error.classList.remove('active');
-            loading.classList.add('active');
-            submitBtn.disabled = true;
-            
+            progressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/progress/${taskId}`);
+                    if (!response.ok) {
+                        throw new Error('無法獲取進度');
+                    }
+                    
+                    const data = await response.json();
+                    updateProgressBar(data.progress, data.message);
+                    
+                    if (data.status === 'completed') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        progressContainer.classList.remove('active');
+                        
+                        // 如果是預覽，顯示預覽視頻
+                        if (taskId === currentTaskId) {
+                            await loadPreviewVideo(taskId);
+                        } else {
+                            // 完整視頻，下載
+                            downloadVideo(taskId);
+                        }
+                    } else if (data.status === 'error') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        progressContainer.classList.remove('active');
+                        showError(data.message || '生成失敗');
+                        enableButtons();
+                    }
+                } catch (err) {
+                    console.error('進度查詢錯誤:', err);
+                }
+            }, 500);
+        }
+        
+        async function loadPreviewVideo(taskId) {
             try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
+                const response = await fetch(`/download/${taskId}`);
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || '處理失敗');
+                    throw new Error('無法加載預覽視頻');
                 }
                 
-                // Get the video file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const previewVideo = document.getElementById('previewVideo');
+                previewVideo.src = url;
+                
+                const previewContainer = document.getElementById('previewContainer');
+                previewContainer.classList.add('active');
+                
+                // 保存預覽任務ID以便下載
+                previewVideo.dataset.taskId = taskId;
+            } catch (err) {
+                showError('無法加載預覽視頻: ' + err.message);
+            }
+        }
+        
+        async function downloadVideo(taskId) {
+            try {
+                const response = await fetch(`/download/${taskId}`);
+                if (!response.ok) {
+                    throw new Error('無法下載視頻');
+                }
+                
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -315,18 +525,113 @@
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
                 
-                // Reset form
-                this.reset();
-                document.getElementById('audioInfo').textContent = '';
-                document.getElementById('imageInfo').textContent = '';
-                
+                enableButtons();
             } catch (err) {
-                error.textContent = '錯誤: ' + err.message;
-                error.classList.add('active');
-            } finally {
-                loading.classList.remove('active');
-                submitBtn.disabled = false;
+                showError('下載失敗: ' + err.message);
+                enableButtons();
             }
+        }
+        
+        function disableButtons() {
+            document.getElementById('previewBtn').disabled = true;
+            document.getElementById('generateBtn').disabled = true;
+        }
+        
+        function enableButtons() {
+            document.getElementById('previewBtn').disabled = false;
+            document.getElementById('generateBtn').disabled = false;
+        }
+        
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = '錯誤: ' + message;
+            error.classList.add('active');
+        }
+        
+        function hideError() {
+            const error = document.getElementById('error');
+            error.classList.remove('active');
+        }
+        
+        document.getElementById('previewBtn').addEventListener('click', async function() {
+            const form = document.getElementById('uploadForm');
+            const audioFile = document.getElementById('audio').files[0];
+            
+            if (!audioFile) {
+                showError('請先選擇音頻文件');
+                return;
+            }
+            
+            hideError();
+            disableButtons();
+            document.getElementById('previewContainer').classList.remove('active');
+            
+            const formData = new FormData(form);
+            formData.append('preview_duration', '8.0');
+            
+            try {
+                const response = await fetch('/preview', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '預覽生成失敗');
+                }
+                
+                const data = await response.json();
+                startProgressPolling(data.task_id);
+            } catch (err) {
+                showError(err.message);
+                enableButtons();
+            }
+        });
+        
+        document.getElementById('generateBtn').addEventListener('click', async function() {
+            const form = document.getElementById('uploadForm');
+            const audioFile = document.getElementById('audio').files[0];
+            
+            if (!audioFile) {
+                showError('請先選擇音頻文件');
+                return;
+            }
+            
+            hideError();
+            disableButtons();
+            document.getElementById('previewContainer').classList.remove('active');
+            
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '視頻生成失敗');
+                }
+                
+                const data = await response.json();
+                startProgressPolling(data.task_id);
+            } catch (err) {
+                showError(err.message);
+                enableButtons();
+            }
+        });
+        
+        document.getElementById('downloadPreviewBtn').addEventListener('click', function() {
+            const previewVideo = document.getElementById('previewVideo');
+            const taskId = previewVideo.dataset.taskId;
+            if (taskId) {
+                downloadVideo(taskId);
+            }
+        });
+        
+        document.getElementById('regenerateBtn').addEventListener('click', function() {
+            document.getElementById('generateBtn').click();
         });
     </script>
 </body>
